@@ -78,3 +78,39 @@ class TensorboardCallback(BaseCallback):
         for key in self.info_keywords:
             self.logger.record("rollout/" + key, np.mean(self.rollout_info[key]))
 
+
+def set_callbacks(env, log):
+    # Define callbacks for evaluation and saving the agent
+    eval_callback = EvalCallback(
+        eval_env=env,
+        callback_on_new_best=EnvDumpCallback(log, verbose=0),
+        n_eval_episodes=10,
+        best_model_save_path=log,
+        log_path=log,
+        eval_freq=1_000,
+        deterministic=True,
+        render=False,
+        verbose=1,
+    )
+
+    checkpoint_callback = CheckpointCallback(
+        save_freq=25_000,
+        save_path=log,
+        save_vecnormalize=True,
+        verbose=1,
+    )
+
+    return [eval_callback, checkpoint_callback]
+
+# Function that creates and monitors vectorized environments:
+def make_parallel_envs(env_name, ep_steps, log, num_env, start_index=0):
+    def make_env(_):
+        def _thunk():
+            env = gymnasium.make(env_name,render_mode='rgb_array')
+            env._max_episode_steps = ep_steps
+            env = Monitor(env, log)
+            return env
+
+        return _thunk
+
+    return SubprocVecEnv([make_env(i + start_index) for i in range(num_env)])

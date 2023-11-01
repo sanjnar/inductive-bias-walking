@@ -51,6 +51,8 @@ class Controller(nn.Module):
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
+
+        return self.actor_loss.item(), self.critic_loss.item()
         
         # self.logger['actor_losses'].append(actor_loss.detach())
 

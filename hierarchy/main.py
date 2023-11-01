@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import os
 import torch
 import numpy as np
@@ -8,11 +8,14 @@ from datetime import datetime
 from agent import HierarchicalAgent
 import shutil
 
+from torch.utils.tensorboard import SummaryWriter
+
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 
 ENV_NAME    = "Humanoid-v4"
+LOGGING_NAME = "hier_humanoid"
 NOW = datetime.now().strftime("%Y-%m-%d/%H-%M-%S")
-TENSORBOARD_LOG = os.path.join("output", "training", NOW) + "_humanoid"
+TENSORBOARD_LOG = os.path.join("output", "training", NOW) + "_" + LOGGING_NAME
 MAX_EPISODE_STEPS = 1000  # default: 100 
 
 def main():
@@ -33,8 +36,11 @@ def main():
         # envs = make_parallel_envs(ENV_NAME, MAX_EPISODE_STEPS, TENSORBOARD_LOG, 16)
         # envs = VecNormalize(envs)
 
-        envs = gymnasium.make(ENV_NAME)
-        callbacks = set_callbacks(envs, TENSORBOARD_LOG)
+        envs = gym.make(ENV_NAME)
+        # callbacks = set_callbacks(envs, TENSORBOARD_LOG)
+
+        # set up logging
+        writer = SummaryWriter(log_dir=TENSORBOARD_LOG)
 
         state_dim = envs.observation_space.shape[0]
         action_dim = envs.action_space.shape[0]
@@ -44,6 +50,8 @@ def main():
                     envs=envs,
                     state_dim=state_dim,
                     action_dim=action_dim,
+                    writer=writer,
+                    model_save_path=TENSORBOARD_LOG,
                     )
 
         # setting libraries seeds to try and have repeatability
