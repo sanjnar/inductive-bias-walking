@@ -18,13 +18,15 @@ class HierarchicalAgent():
         self,
         envs,
         state_dim,
-        action_dim):
+        action_dim,
+        writer,
+        model_save_path):
 
         self.gamma = 0.95
 
         # Model parameters
         self.save_freq = 2000
-        model_path = "model"
+        self.model_path = model_save_path
 
 
         subgoal_dim = state_dim     # subgoal should be same as state (footstep planner)
@@ -160,8 +162,14 @@ class HierarchicalAgent():
         batch_rtgs_high = torch.tensor(np.array(self.compute_rtgs(batch_rews_high)), dtype=torch.float)                
         batch_rtgs_low = torch.tensor(np.array(self.compute_rtgs(batch_rews_low)), dtype=torch.float)             
 
-        # self.logger['batch_rews'] = batch_rews
-        # self.logger['batch_lens'] = batch_lens
+        if self.writer:
+            self.writer.add_scalar("reward/high_mean_batch_rew", torch.mean(batch_rtgs_high))
+            self.writer.add_scalar("reward/low_mean_batch_rew", torch.mean(batch_rtgs_low))
+            
+            self.writer.add_scalar("len/mean_batch_len", torch.mean(batch_lens))
+
+            self.writer.add_scalar("reward/high_mean_batch_rew", low_actor_loss)
+            self.writer.add_scalar("reward/high_mean_batch_rew", low_actor_loss)
         
         return batch_state, batch_acts, batch_subgoals, batch_log_probs_low, batch_log_probs_high, batch_rtgs_low, batch_rtgs_high, batch_lens
         
@@ -228,13 +236,19 @@ class HierarchicalAgent():
             print('iteration updates')
             for _ in range(self.n_updates_per_iteration):
                 V, curr_log_probs = self.evaluate_high(batch_state, batch_subgoals, batch_acts)
-                self.low_con.optimizer_step(V, curr_log_probs, batch_log_probs_low, batch_rtgs_low, A_k_low)
+                low_actor_loss, low_critic_loss = self.low_con.optimizer_step(V, curr_log_probs, batch_log_probs_low, batch_rtgs_low, A_k_low)
                 
                 V, curr_log_probs = self.evaluate_low(batch_state, batch_subgoals, batch_acts)
-                self.high_con.optimizer_step(V, curr_log_probs, batch_log_probs_high, batch_rtgs_high, A_k_high)
-
-            # self._log_summary()
+                high_actor_loss, high_critic_loss = self.high_con.optimizer_step(V, curr_log_probs, batch_log_probs_high, batch_rtgs_high, A_k_high)
 
             if i_so_far % self.save_freq == 0:
-                torch.save(self.actor.state_dict(), './ppo_actor.pth')
-                torch.save(self.critic.state_dict(), './ppo_critic.pth')
+                torch.save(self.low_con.actor.state_dict(), '%s/ppo_low_actor_%d.pth' % (self.model_save_path, i_so_far))
+                torch.save(self.low_con.critic.state_dict(), '%s/ppo_low_critic_%d.pth' % (self.model_save_path, i_so_far))
+                torch.save(self.high_con.actor.state_dict(), '%s/ppo_high_actor_%d.pth' % (self.model_save_path, i_so_far))
+                torch.save(self.high_con.critic.state_dict(), '%s/ppo_high_critic_%d.pth' % (self.model_save_path, i_so_far))
+            
+            if self.writer:
+                self.writer.add_scalar("loss/low_actor_loss", low_actor_loss)
+                self.writer.add_scalar("loss/low_critic_loss", low_critic_loss)
+                self.writer.add_scalar("loss/high_actor_loss", high_actor_loss)
+                self.writer.add_scalar("loss/high_actor_loss", high_actor_loss)
