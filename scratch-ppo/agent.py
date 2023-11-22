@@ -23,7 +23,9 @@ class Agent():
         model_save_path):
 
         self.gamma = 0.99
+        self.lam = 0.9
         self.entropy_coeff = 3.61209e-05
+        self.vf_coeff = 0.835671
         self.clip = 0.3
 
         self.save_freq = 1000
@@ -53,7 +55,19 @@ class Agent():
         self.timesteps_per_batch = 2048
 
         self.n_updates_per_iteration = 10
-        print('parameters: gamma', self.gamma, 'entropy coeff', self.entropy_coeff, 'max time', self.max_timesteps_per_episode, 'batch times', self.timesteps_per_batch, 'updates per iteration', self.n_updates_per_iteration)
+        print('parameters: gamma', self.gamma, 'lambda', self.lam, 'entropy coeff', self.entropy_coeff, 'max time', self.max_timesteps_per_episode, 'batch times', self.timesteps_per_batch, 'updates per iteration', self.n_updates_per_iteration)
+
+    def compute_gaes(self, values, batch_rtgs, dones):
+        advantages = []
+        next_value = 0
+        gae_advantage = 0
+        for value, reward, done in zip(reversed(values), reversed(batch_rtgs), reversed(dones)):
+            delta = reward + (1 - done) * self.gamma * next_value - value
+            gae_advantage = delta + self.gamma * self.lam * gae_advantage
+            advantages.insert(0, gae_advantage)
+            next_value = value
+        return torch.tensor(advantages, dtype=torch.float)
+        
 
     def learn(self, total_timesteps):
         print(f"Learning... Running {self.max_timesteps_per_episode} timesteps per episode, ", end='')
@@ -65,7 +79,7 @@ class Agent():
         while t_so_far < total_timesteps:
             self.writer.flush()
             # collect batch data via rollouts
-            batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens = self.rollout() # TODO: make mini batches from this
+            batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens, dones = self.rollout() # TODO: make mini batches from this
             t_so_far += np.sum(batch_lens)
             i_so_far += 1
             
@@ -73,7 +87,8 @@ class Agent():
 
 			# Calculate advantages for the rollout 
             V, _, _ = self.evaluate(batch_obs, batch_acts)
-            A_k = batch_rtgs - V.detach()
+            # A_k = batch_rtgs - V.detach()
+            A_k = self.compute_gaes(V, batch_rtgs, dones)
             A_k = (A_k - A_k.mean()) / (A_k.std() + 1e-10)
 
             avg_batch_rtgs = torch.mean(batch_rtgs)
@@ -92,16 +107,17 @@ class Agent():
                 entropy_loss = entropy.mean()
 
                 actor_loss = actor_loss - self.entropy_coeff * entropy_loss
+                critic_loss = self.vf_coeff * critic_loss
 
-                print('actor parameters')
-                for name, param in self.con.actor.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name}: {param.data}")
+                # print('actor parameters')
+                # for name, param in self.con.actor.named_parameters():
+                #     if param.requires_grad:
+                #         print(f"{name}: {param.data}")
 
-                print('critic parameters')
-                for name, param in self.con.critic.named_parameters():
-                    if param.requires_grad:
-                        print(f"{name}: {param.data}")
+                # print('critic parameters')
+                # for name, param in self.con.critic.named_parameters():
+                #     if param.requires_grad:
+                #         print(f"{name}: {param.data}")
 
                 self.con.actor_optimizer.zero_grad()
                 actor_loss.backward(retain_graph=True)
@@ -149,7 +165,8 @@ class Agent():
         batch_rews = []
         batch_rtgs = []
         batch_lens = []
-        
+        dones = []
+
         ep_rews = []
         
         t = 0 # Keeps track of how many timesteps we've run so far this batch
@@ -171,6 +188,7 @@ class Agent():
                 ep_rews.append(rew)
                 batch_acts.append(action)
                 batch_log_probs.append(log_prob)
+                dones.append(done)
 
                 if done:
                     break
@@ -178,11 +196,11 @@ class Agent():
             batch_lens.append(ep_t + 1)
             batch_rews.append(ep_rews)
             
-        batch_obs = torch.tensor(batch_obs, dtype=torch.float)
-        batch_acts = torch.tensor(batch_acts, dtype=torch.float)
+        batch_obs = torch.tensor(np.array(batch_obs), dtype=torch.float)
+        batch_acts = torch.tensor(np.array(batch_acts), dtype=torch.float)
         batch_log_probs = torch.tensor(batch_log_probs, dtype=torch.float)
         batch_rtgs = self.compute_rtgs(batch_rews)
-        return batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens
+        return batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens, dones
         
     def compute_rtgs(self, batch_rews):
         # compute reward-to-go
